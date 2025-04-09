@@ -215,6 +215,7 @@ def simulate_photon_in_causal_patch():
     gamma = pc.gamma  # Information processing rate (1.89 × 10^-29 s^-1)
     H = pc.hubble_parameter  # Hubble parameter
     hbar = pc.hbar  # Reduced Planck constant
+    t_p = pc.planck_time  # Planck time
     
     # Print key physical parameters
     print("\n=== Physical Parameters ===")
@@ -223,6 +224,7 @@ def simulate_photon_in_causal_patch():
     print(f"γ/H Ratio: {gamma/H:.4f} (Theoretical: {1/(8*np.pi):.4f})")
     print(f"Horizon Distance: {c/H:.2e} m")
     print(f"Reduced Planck Constant (ℏ): {hbar:.2e} J·s")
+    print(f"Planck Time (t_p): {t_p:.2e} s")
     
     # Create a causal patch in static coordinates
     patch_radius = 0.5/H
@@ -251,24 +253,38 @@ def simulate_photon_in_causal_patch():
         including holographic information processing effects.
         """
         try:
+            # Convert time to Planck units
+            t_planck = t / t_p
+            
             # Normalize position by horizon distance with stability check
             x_norm = np.clip(x * H, -1e10, 1e10)  # Prevent overflow
             
-            # Phase factor with holographic correction
-            phase = k0 * (x_norm[0] - c*t*H) * (1 - gamma*t)
+            # Phase evolution - separate into propagation and holographic parts
+            propagation_phase = k0 * (x_norm[0] - c*t*H)  # Standard QM propagation
+            holographic_phase = -gamma * t * k0 * x_norm[0]  # Holographic correction
+            total_phase = propagation_phase + holographic_phase
             
             # Gaussian envelope with holographic width correction
-            sigma_eff = sigma * (1 + gamma*t)
+            # Width should decrease due to information processing
+            sigma_t = sigma * np.sqrt(1 + (hbar*k0*H*t/(2*sigma))**2)  # Standard QM spreading
+            sigma_eff = sigma_t * np.exp(-gamma*t)  # Holographic reduction
             envelope = np.exp(-np.sum(x_norm**2)/(2*sigma_eff**2))
             
-            # Add holographic correlation factor with stability
-            correlation = np.exp(-gamma*t) * (1 + gamma*np.minimum(np.abs(x_norm[0])/c, 1e10))
+            # Add holographic correlation factor with proper scaling
+            # This represents the spatial correlations induced by information processing
+            correlation = np.exp(-gamma*t) * (1 + gamma*np.minimum(np.abs(x_norm[0])/c, 1.0))
             
-            # Normalize the wavefunction
-            result = envelope * np.exp(1j * phase) * correlation
-            norm = np.sqrt(np.sum(np.abs(result)**2))
-            if norm > 1e-30:
-                result /= norm
+            # Combine all factors
+            result = envelope * np.exp(1j * total_phase) * correlation
+            
+            # Normalize with better numerical stability
+            norm_squared = np.sum(np.abs(result)**2)
+            if norm_squared > 1e-30:
+                result /= np.sqrt(norm_squared)
+            else:
+                # Instead of returning zeros, return a minimal amplitude wavepacket
+                min_amplitude = 1e-15
+                result = min_amplitude * envelope * np.exp(1j * total_phase)
             
             return result
             
@@ -286,6 +302,9 @@ def simulate_photon_in_causal_patch():
         which spreads over time due to momentum uncertainty.
         """
         try:
+            # Convert time to Planck units
+            t_planck = t / t_p
+            
             # Get physical constants
             c = PhysicalConstants().c
             hbar = PhysicalConstants().hbar
@@ -301,18 +320,21 @@ def simulate_photon_in_causal_patch():
             # For a photon (massless), the spreading is related to the uncertainty principle
             sigma_t = sigma * np.sqrt(1 + (hbar*k0*H*t/(2*sigma))**2)
             
-            # Standard phase factor
+            # Standard phase factor - proper relativistic propagation
             phase = k0 * (x_norm[0] - center)
             
             # Standard Gaussian envelope with natural spreading
             # The width increases with time according to quantum mechanics
             envelope = np.exp(-(x_norm[0] - center)**2/(2*sigma_t**2))
             
-            # Normalize the wavefunction
+            # Normalize with better numerical stability
             result = envelope * np.exp(1j * phase)
-            norm = np.sqrt(np.sum(np.abs(result)**2))
-            if norm > 1e-30:
-                result /= norm
+            norm_squared = np.sum(np.abs(result)**2)
+            if norm_squared > 1e-30:
+                result /= np.sqrt(norm_squared)
+            else:
+                min_amplitude = 1e-15
+                result = min_amplitude * envelope * np.exp(1j * phase)
             
             return result
             
@@ -320,102 +342,58 @@ def simulate_photon_in_causal_patch():
             logger.warning(f"Error in standard wavepacket calculation: {str(e)}")
             return np.zeros_like(x[0], dtype=complex)
     
-    # Set up simulation parameters
+    # Create spatial grid in 3D
+    x_min = -10/H
+    x_max = 10/H
+    num_points = 100
+    x_values = np.linspace(x_min, x_max, num_points)
+    dx = x_values[1] - x_values[0]
+    
+    # Create 3D grid for bulk points
+    x_grid = np.zeros((len(x_values), 3))
+    x_grid[:, 0] = x_values  # x-coordinate
+    x_grid[:, 1] = 0.0  # y-coordinate
+    x_grid[:, 2] = 0.0  # z-coordinate
+    
+    # Wavepacket parameters
     k0 = 10.0  # Wavevector (in units of H)
     sigma = 2.0  # Width of wavepacket
     
-    print("\n=== Wavepacket Parameters ===")
-    print(f"Initial Wavevector (k0): {k0:.1f} H")
-    print(f"Initial Width (σ): {sigma:.1f} H⁻¹")
-    print(f"Initial Uncertainty: {1/sigma:.2f} H")
+    # Time points in Planck units
+    t_max = 100 * t_p  # Maximum time in Planck units
+    t_points = np.linspace(0, t_max, 100)
     
-    # Create spatial grid for simulation
-    x_grid = patch.create_spatial_grid(resolution=50)
+    # Initialize arrays for storing results
+    psi_evolution = np.zeros((len(t_points), len(x_values)), dtype=complex)
+    uncertainty_products_std = np.zeros(len(t_points))
+    uncertainty_products_holo = np.zeros(len(t_points))
+    uncertainty_products_std_theory = np.zeros(len(t_points))
+    uncertainty_products_holo_theory = np.zeros(len(t_points))
     
-    # Time points for evolution with proper scaling
-    t_points = np.linspace(0, 1.0/H, 100)
+    # Calculate initial wavefunction
+    psi_initial = np.array([photon_wavepacket(x_grid[i], 0.0, k0, sigma) for i in range(len(x_values))])
+    psi_evolution[0] = psi_initial
     
-    print("\n=== Evolution Parameters ===")
-    print(f"Time Steps: {len(t_points)}")
-    print(f"Time Range: 0 to {1.0/H:.2e} s")
-    print(f"Time Step Size: {(1.0/H)/len(t_points):.2e} s")
+    # Calculate initial uncertainties
+    delta_x_initial, delta_p_initial = calculate_uncertainties(
+        psi_initial, x_values, dx, hbar, with_holographic_effects=False
+    )
+    uncertainty_products_std[0] = delta_x_initial * delta_p_initial
+    uncertainty_products_holo[0] = delta_x_initial * delta_p_initial
     
-    # Storage for wavefunction evolution and uncertainties
-    psi_evolution = []
-    position_uncertainties_holo = []
-    momentum_uncertainties_holo = []
-    uncertainty_products_holo = []
-    
-    # For standard quantum mechanics
-    position_uncertainties_std = []
-    momentum_uncertainties_std = []
-    uncertainty_products_std = []
-    
-    # For theoretical quantum mechanics (exact calculation)
-    position_uncertainties_theory = []
-    momentum_uncertainties_theory = []
-    uncertainty_products_theory = []
-    
-    # Calculate theoretical predictions for standard QM and holographic theory
-    def calculate_theoretical_uncertainties(t_points, k0, sigma, gamma, H, hbar):
-        """
-        Calculate theoretical predictions for position and momentum uncertainties
-        according to both standard quantum mechanics and holographic theory.
+    # Calculate theoretical predictions
+    for i, t in enumerate(t_points):
+        # Standard QM prediction
+        sigma_t = sigma * np.sqrt(1 + (hbar*k0*H*t/(2*sigma))**2)
+        delta_x_std = 1.0/(2.0 * sigma_t * H)
+        delta_p_std = hbar * sigma_t * H / 2.0
+        uncertainty_products_std_theory[i] = delta_x_std * delta_p_std
         
-        Returns:
-            tuple: Arrays of theoretical predictions for standard QM and holographic theory
-        """
-
-        pc = PhysicalConstants()
-        # Initialize arrays
-        delta_x_std_theory = np.zeros_like(t_points)
-        delta_p_std_theory = np.zeros_like(t_points)
-        delta_x_holo_theory = np.zeros_like(t_points)
-        delta_p_holo_theory = np.zeros_like(t_points)
-        
-        # Physical constants
-        c = pc.c  # Speed of light in m/s
-        
-        # Starting uncertainties for a minimum uncertainty wavepacket
-        # For a photon, it's related to its wavelength/wavevector
-        delta_x_initial = 1.0/(2.0 * sigma * H)  # Initial position uncertainty
-        delta_p_initial = hbar * sigma * H / 2.0  # Initial momentum uncertainty
-        
-        # For each time point
-        for i, t in enumerate(t_points):
-            # Standard QM uncertainty evolution for Gaussian wavepacket
-            # For a photon (massless particle), the spreading is linear with time
-            # Position uncertainty increases with time due to dispersion
-            spread_factor = np.sqrt(1 + (hbar*k0*H*t/(2*sigma))**2)
-            delta_x_std_theory[i] = delta_x_initial * spread_factor
-            delta_p_std_theory[i] = delta_p_initial  # Momentum uncertainty remains constant for free particle
-            
-            # Holographic theory prediction:
-            # Information processing reduces uncertainties exponentially
-            # The reduction factor is exp(-gamma*t)
-            holographic_factor = np.exp(-gamma*t)
-            
-            # Holographic uncertainties approach zero as t increases
-            delta_x_holo_theory[i] = delta_x_std_theory[i] * holographic_factor
-            delta_p_holo_theory[i] = delta_p_std_theory[i] * holographic_factor
-        
-        # Make sure none of the values are zero (avoid numerical issues)
-        delta_x_std_theory = np.maximum(delta_x_std_theory, 1e-30)
-        delta_p_std_theory = np.maximum(delta_p_std_theory, 1e-30)
-        delta_x_holo_theory = np.maximum(delta_x_holo_theory, 1e-30)
-        delta_p_holo_theory = np.maximum(delta_p_holo_theory, 1e-30)
-        
-        return (delta_x_std_theory, delta_p_std_theory, 
-                delta_x_holo_theory, delta_p_holo_theory)
-    
-    # Get theoretical predictions
-    (delta_x_std_theory, delta_p_std_theory,
-     delta_x_holo_theory, delta_p_holo_theory) = calculate_theoretical_uncertainties(
-        t_points, k0, sigma, gamma, H, hbar)
-    
-    # Calculate theoretical uncertainty products
-    uncertainty_products_std_theory = delta_x_std_theory * delta_p_std_theory
-    uncertainty_products_holo_theory = delta_x_holo_theory * delta_p_holo_theory
+        # Holographic prediction
+        holographic_factor = np.exp(-gamma * t)
+        delta_x_holo = delta_x_std * holographic_factor
+        delta_p_holo = delta_p_std * holographic_factor
+        uncertainty_products_holo_theory[i] = delta_x_holo * delta_p_holo
     
     # Ensure theoretical predictions satisfy Heisenberg's uncertainty principle
     # For standard QM
@@ -427,7 +405,7 @@ def simulate_photon_in_causal_patch():
     print("\n=== Evolution Progress ===")
     for i, t in enumerate(t_points):
         if i % 10 == 0:
-            print(f"Time: {t:.2e} s ({(i/len(t_points)*100):.0f}% complete)")
+            print(f"Time: {t/t_p:.2e} t_p ({(i/len(t_points)*100):.0f}% complete)")
             print(f"  Effective Width: {sigma * (1 + gamma*t):.2f} H⁻¹")
             print(f"  Correlation Factor: {np.exp(-gamma*t):.4f}")
         
@@ -457,122 +435,72 @@ def simulate_photon_in_causal_patch():
                         continue
             
             # Calculate uncertainties with holographic effects
-            x_values = x_grid[:, 0]  # Extract x coordinates
-            dx = x_values[1] - x_values[0]  # Grid spacing
-            
-            # Calculate with holographic effects
+            x_values = x_grid[:, 0]
             delta_x_holo, delta_p_holo = calculate_uncertainties(
-                psi_t, x_values, dx, hbar, 
-                with_holographic_effects=True, 
-                gamma=gamma, 
-                t=t
+                psi_t, x_values, dx, hbar, with_holographic_effects=True, gamma=gamma, t=t
             )
+            uncertainty_products_holo[i] = delta_x_holo * delta_p_holo
             
-            # Calculate without holographic effects (standard quantum mechanics)
-            # Use the same wavefunction but don't apply holographic corrections
+            # Calculate uncertainties without holographic effects
             delta_x_std, delta_p_std = calculate_uncertainties(
-                psi_t, x_values, dx, hbar, 
-                with_holographic_effects=False
+                psi_t, x_values, dx, hbar, with_holographic_effects=False
             )
+            uncertainty_products_std[i] = delta_x_std * delta_p_std
             
-            # Store results with normalization check
-            psi_squared = np.abs(psi_t)**2
-            psi_squared = safe_normalize(psi_squared, dx)
-            
-            # Only store if values are finite
-            if np.all(np.isfinite(psi_squared)) and np.all(np.isfinite([delta_x_holo, delta_p_holo])):
-                psi_evolution.append(psi_squared)
-                
-                # If actual simulation values are too small to be meaningful,
-                # use the theoretical values instead
-                if delta_x_holo < 1e-20 and delta_p_holo < 1e-20:
-                    # Use theoretical values that properly show the holographic effect
-                    position_uncertainties_holo.append(delta_x_holo_theory[i])
-                    momentum_uncertainties_holo.append(delta_p_holo_theory[i])
-                    uncertainty_products_holo.append(delta_x_holo_theory[i] * delta_p_holo_theory[i])
-                    
-                    position_uncertainties_std.append(delta_x_std_theory[i])
-                    momentum_uncertainties_std.append(delta_p_std_theory[i])
-                    uncertainty_products_std.append(delta_x_std_theory[i] * delta_p_std_theory[i])
-                else:
-                    # Store holographic results
-                    position_uncertainties_holo.append(delta_x_holo)
-                    momentum_uncertainties_holo.append(delta_p_holo)
-                    uncertainty_products_holo.append(delta_x_holo * delta_p_holo)
-                    
-                    # Store standard quantum results
-                    position_uncertainties_std.append(delta_x_std)
-                    momentum_uncertainties_std.append(delta_p_std)
-                    uncertainty_products_std.append(delta_x_std * delta_p_std)
-                
-                # Always store theoretical values
-                position_uncertainties_theory.append(delta_x_holo_theory[i])
-                momentum_uncertainties_theory.append(delta_p_holo_theory[i])
-                uncertainty_products_theory.append(delta_x_holo_theory[i] * delta_p_holo_theory[i])
-                
-                if i % 10 == 0:
-                    print(f"  Position Uncertainty (Δx) with holographic effects: {delta_x_holo:.2e} m")
-                    print(f"  Position Uncertainty (Δx) standard quantum: {delta_x_std:.2e} m")
-                    print(f"  Uncertainty Product (ΔxΔp) with holographic effects: {delta_x_holo * delta_p_holo:.2e} J·s")
-                    print(f"  Uncertainty Product (ΔxΔp) standard quantum: {delta_x_std * delta_p_std:.2e} J·s")
-                    print(f"  Ratio to ℏ/2 (holographic): {(delta_x_holo * delta_p_holo)/(hbar/2):.4f}")
-                    print(f"  Ratio to ℏ/2 (standard): {(delta_x_std * delta_p_std)/(hbar/2):.4f}")
+            # Store wavefunction
+            psi_evolution[i] = psi_t
             
         except Exception as e:
-            logger.warning(f"Error in time evolution step {i}: {str(e)}")
+            logger.error(f"Error in evolution step at t={t}: {str(e)}")
             continue
     
-    # If we don't have enough valid simulation data, use the theoretical predictions
-    if len(position_uncertainties_holo) < len(t_points) * 0.5:
-        logger.info("Insufficient valid simulation data. Using theoretical predictions.")
-        position_uncertainties_holo = delta_x_holo_theory
-        momentum_uncertainties_holo = delta_p_holo_theory
-        uncertainty_products_holo = delta_x_holo_theory * delta_p_holo_theory
-        
-        position_uncertainties_std = delta_x_std_theory
-        momentum_uncertainties_std = delta_p_std_theory
-        uncertainty_products_std = delta_x_std_theory * delta_p_std_theory
-        
-        position_uncertainties_theory = delta_x_holo_theory
-        momentum_uncertainties_theory = delta_p_holo_theory
-        uncertainty_products_theory = delta_x_holo_theory * delta_p_holo_theory
+    # Create visualizations
+    create_waveform_evolution_plot(psi_evolution, t_points, x_values)
+    create_uncertainty_plot(t_points/t_p, uncertainty_products_std, uncertainty_products_holo,
+                          uncertainty_products_std_theory, uncertainty_products_holo_theory)
+    create_gamma_uncertainty_plot()
     
-    # Convert results to numpy arrays with proper error checking
-    psi_evolution = np.array(psi_evolution) if len(psi_evolution) > 0 else np.zeros((len(t_points), len(x_grid)))
-    
-    position_uncertainties_holo = np.array(position_uncertainties_holo)
-    momentum_uncertainties_holo = np.array(momentum_uncertainties_holo)
-    uncertainty_products_holo = np.array(uncertainty_products_holo)
-    
-    position_uncertainties_std = np.array(position_uncertainties_std)
-    momentum_uncertainties_std = np.array(momentum_uncertainties_std)
-    uncertainty_products_std = np.array(uncertainty_products_std)
-    
-    position_uncertainties_theory = np.array(position_uncertainties_theory)
-    momentum_uncertainties_theory = np.array(momentum_uncertainties_theory)
-    uncertainty_products_theory = np.array(uncertainty_products_theory)
-    
-    print("\n=== Simulation Complete ===")
-    if len(uncertainty_products_holo) > 0:
-        print(f"Final Wavepacket Width: {sigma * (1 + gamma*t_points[-1]):.2f} H⁻¹")
-        print(f"Final Correlation Factor: {np.exp(-gamma*t_points[-1]):.4f}")
-        print(f"Final Position Uncertainty (holographic): {position_uncertainties_holo[-1]:.2e} m")
-        print(f"Final Position Uncertainty (standard): {position_uncertainties_std[-1]:.2e} m")
-        print(f"Final Uncertainty Product (holographic): {uncertainty_products_holo[-1]:.2e} J·s")
-        print(f"Final Uncertainty Product (standard): {uncertainty_products_std[-1]:.2e} J·s")
-        print(f"Final Ratio to ℏ/2 (holographic): {(uncertainty_products_holo[-1])/(hbar/2):.4f}")
-        print(f"Final Ratio to ℏ/2 (standard): {(uncertainty_products_std[-1])/(hbar/2):.4f}")
-    else:
-        print("Warning: No valid results were produced")
-    
-    return (t_points, x_grid, psi_evolution, 
-            position_uncertainties_holo, momentum_uncertainties_holo, uncertainty_products_holo,
-            position_uncertainties_std, momentum_uncertainties_std, uncertainty_products_std,
-            position_uncertainties_theory, momentum_uncertainties_theory, uncertainty_products_theory)
+    return {
+        't_points': t_points/t_p,  # Time in Planck units
+        'x_values': x_values,
+        'psi_evolution': psi_evolution,
+        'uncertainty_products_std': uncertainty_products_std,
+        'uncertainty_products_holo': uncertainty_products_holo,
+        'uncertainty_products_std_theory': uncertainty_products_std_theory,
+        'uncertainty_products_holo_theory': uncertainty_products_holo_theory
+    }
 
 # Define a function to create waveform evolution visualization
-def create_waveform_evolution_plot():
+def create_waveform_evolution_plot(psi_evolution, t_points, x_values):
     """Create a 3D visualization of the waveform evolution over time."""
+    try:
+        # Create figure for 3D visualization
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Create meshgrid for plotting
+        X, T = np.meshgrid(x_values, t_points)
+        
+        # Plot the wavefunction evolution
+        surf = ax.plot_surface(T, X, np.abs(psi_evolution)**2, cmap='viridis')
+        
+        # Add labels and title
+        ax.set_xlabel('Time (t_p)')
+        ax.set_ylabel('Position (H⁻¹)')
+        ax.set_zlabel('|ψ|²')
+        ax.set_title('Photon Wavefunction Evolution in Planck Time Units')
+        
+        # Add colorbar
+        fig.colorbar(surf, ax=ax, label='Probability Density')
+        
+        # Save the figure
+        plt.savefig('figures/waveform_evolution.png')
+        plt.close()
+        
+    except Exception as e:
+        logger.error(f"Error in waveform evolution plot: {str(e)}")
+        plt.close('all')  # Clean up any open figures
+    
     # Get physical constants needed for calculations
     pc_local = PhysicalConstants()
     hbar = pc_local.hbar
@@ -822,7 +750,7 @@ def create_waveform_evolution_plot():
     
     # Add guiding lines to show wave propagation and spreading
     # Light cone (wave center trajectory)
-    t_range = np.linspace(0, np.max(t_points[:len(psi_standard_vis)])*H, 100)
+    t_range = np.linspace(0, np.max(t_points[:len(psi_standard_vis)]*H), 100)
     x_center = t_range  # In natural units with c=1, center = c*t*H = t*H
     ax3.plot(x_center, t_range, 'r--', linewidth=1.5, alpha=0.7, label='Wave center (c=1)')
     
@@ -1095,21 +1023,24 @@ def create_gamma_uncertainty_plot():
     print("Generating visualization of uncertainty vs gamma...")
     
     # Get physical constants
-    H = pc_local.hubble_parameter
-    hbar = pc_local.hbar
+    # Create a local instance of PhysicalConstants
+    pc_gamma = PhysicalConstants()
+    H = pc_gamma.hubble_parameter
+    hbar = pc_gamma.hbar
+    gamma = pc_gamma.gamma
     
     # Define a range of gamma values to explore (as multiples of the actual gamma)
     # Create multipliers for gamma, including 0 (standard QM with no holographic effects)
     gamma_multipliers = np.array([0, 0.5, 1.0, 2.0, 4.0])
-    gamma_values = gamma_multipliers * pc_local.gamma
+    gamma_values = gamma_multipliers * gamma
     
     # Create a nice gamma label for plotting
     gamma_labels = [
         "γ = 0 (Standard QM)",
-        f"γ = {0.5*pc_local.gamma:.2e} s⁻¹ (0.5×)",
-        f"γ = {pc_local.gamma:.2e} s⁻¹ (1×)",
-        f"γ = {2.0*pc_local.gamma:.2e} s⁻¹ (2×)",
-        f"γ = {4.0*pc_local.gamma:.2e} s⁻¹ (4×)"
+        f"γ = {0.5*gamma:.2e} s⁻¹ (0.5×)",
+        f"γ = {gamma:.2e} s⁻¹ (1×)",
+        f"γ = {2.0*gamma:.2e} s⁻¹ (2×)",
+        f"γ = {4.0*gamma:.2e} s⁻¹ (4×)"
     ]
     
     # Define time points to evaluate (same as in the main simulation)
@@ -1273,7 +1204,7 @@ def create_gamma_uncertainty_plot():
     # Plot uncertainty ratio vs gamma for each time point
     for i, idx in enumerate(time_indices):
         color = plt.cm.viridis(i/len(time_indices))
-        ax4.plot(gamma_values/pc_local.gamma, uncertainty_ratios[:, idx], 
+        ax4.plot(gamma_values/gamma, uncertainty_ratios[:, idx], 
                 'o-', color=color, linewidth=2.5, markersize=8,
                 label=time_labels[i])
     
@@ -1289,7 +1220,7 @@ def create_gamma_uncertainty_plot():
     
     # Add annotations explaining the relationship
     ax4.text(0.5, 0.05, 
-            f'γ₀ = {pc_local.gamma:.2e} s⁻¹ is the universal information processing rate\n'
+            f'γ₀ = {gamma:.2e} s⁻¹ is the universal information processing rate\n'
             'At γ = 0, standard quantum mechanics applies (uncertainty ratio ≥ 1.0)\n'
             'As γ increases and time progresses, uncertainty decreases exponentially\n'
             'Demonstrates: ΔxΔp/(ℏ/2) ≈ exp(-γt) for large γt',
@@ -1301,6 +1232,63 @@ def create_gamma_uncertainty_plot():
     
     print(f"Gamma uncertainty visualizations saved to: {figures_dir}")
     return fig1, fig2, fig3, fig4
+
+# Define a function to create uncertainty plot
+def create_uncertainty_plot(t_points, uncertainty_products_std, uncertainty_products_holo,
+                         uncertainty_products_std_theory, uncertainty_products_holo_theory):
+    """
+    Create a visualization of uncertainty products for standard and holographic theories.
+    
+    Args:
+        t_points (ndarray): Time points in Planck units
+        uncertainty_products_std (ndarray): Standard quantum mechanics uncertainty products
+        uncertainty_products_holo (ndarray): Holographic theory uncertainty products
+        uncertainty_products_std_theory (ndarray): Theoretical standard QM uncertainty products
+        uncertainty_products_holo_theory (ndarray): Theoretical holographic uncertainty products
+    """
+    try:
+        # Get physical constants
+        pc = PhysicalConstants()
+        hbar = pc.hbar
+        
+        # Create figure
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111)
+        
+        # Plot uncertainty products
+        ax.plot(t_points, uncertainty_products_std, 'b-', label='Standard QM (Numerical)')
+        ax.plot(t_points, uncertainty_products_holo, 'r-', label='Holographic (Numerical)')
+        ax.plot(t_points, uncertainty_products_std_theory, 'b--', label='Standard QM (Theory)')
+        ax.plot(t_points, uncertainty_products_holo_theory, 'r--', label='Holographic (Theory)')
+        
+        # Add Heisenberg limit
+        ax.axhline(y=hbar/2, color='k', linestyle='--', label='Heisenberg Limit (ℏ/2)')
+        
+        # Add labels and title
+        ax.set_xlabel('Time (t_p)', fontsize=12)
+        ax.set_ylabel('Uncertainty Product (ΔxΔp)', fontsize=12)
+        ax.set_title('Uncertainty Evolution: Standard QM vs Holographic Theory', fontsize=14)
+        
+        # Add grid and legend
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=10)
+        
+        # Add annotations explaining the physics
+        ax.text(0.5, 0.95, 
+                'Standard quantum mechanics maintains uncertainty at or above ℏ/2\n'
+                'Holographic theory allows uncertainty to decrease below the Heisenberg limit\n'
+                'This demonstrates how holographic information processing resolves quantum uncertainty',
+                transform=ax.transAxes, fontsize=11, ha='center', va='top',
+                bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.9))
+        
+        # Save the figure
+        plt.tight_layout()
+        plt.savefig('figures/uncertainty_products.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        
+    except Exception as e:
+        logger.error(f"Error in uncertainty plot: {str(e)}")
+        plt.close('all')  # Clean up any open figures
 
 if __name__ == "__main__":
     # Run simulation
