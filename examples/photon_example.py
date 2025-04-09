@@ -550,7 +550,7 @@ def create_gamma_uncertainty_plot():
     print("Generating visualization of uncertainty vs gamma...")
     
     # Create figures directory if it doesn't exist
-    figures_dir = os.path.join(os.path.dirname(__file__), 'figures')
+    figures_dir = os.path.join(os.path.dirname(__file__), 'photon_example/figures')
     os.makedirs(figures_dir, exist_ok=True)
     
     # Get physical constants
@@ -783,7 +783,7 @@ def create_uncertainty_plot(t_points, uncertainty_products_std, uncertainty_prod
         hbar = pc.hbar
         
         # Create figures directory if it doesn't exist
-        figures_dir = os.path.join(os.path.dirname(__file__), 'figures')
+        figures_dir = os.path.join(os.path.dirname(__file__), 'photon_example/figures')
         os.makedirs(figures_dir, exist_ok=True)
         
         # Create figure
@@ -843,7 +843,7 @@ if __name__ == "__main__":
     gamma = pc.gamma
     
     # Create figures directory if it doesn't exist
-    figures_dir = os.path.join(os.path.dirname(__file__), 'figures')
+    figures_dir = os.path.join(os.path.dirname(__file__), 'photon_example/figures')
     os.makedirs(figures_dir, exist_ok=True)
         
     # Add new visualization showing uncertainty vs gamma

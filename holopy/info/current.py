@@ -207,7 +207,8 @@ class InfoCurrentTensor:
         
         # Compute the information current tensor
         # J^μν = ∇^μ∇^νρ - γρ^μρ^ν
-        gamma = self.gamma
+        pc = PhysicalConstants()
+        gamma = pc.gamma
         rho_dyadic = np.outer(density_vector, density_vector)
         tensor = hessian - gamma * rho_dyadic
         
