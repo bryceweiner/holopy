@@ -309,20 +309,29 @@ class GravitySimulation:
         Returns:
             InfoCurrentTensor: Information current tensor
         """
-        # Create density function
-        density_func = self.create_density_function()
-        
-        # Create information current tensor from density function
-        info_current = InfoCurrentTensor.from_density(
-            density_function=density_func,
-            grid_size=self.grid_size,
-            domain=[(-self.radius, self.radius)] * 4,  # 4D spacetime
-            coordinates='cartesian',
-            dimension=4,
-            gamma=self.gamma
-        )
-        
-        return info_current
+        logger.debug("Computing information current tensor")
+        try:
+            # Create density function
+            density_func = self.create_density_function()
+            
+            # Create information current tensor from density function
+            info_current = InfoCurrentTensor.from_density(
+                density_function=density_func,
+                grid_size=self.grid_size,
+                domain=[(-self.radius, self.radius)] * 4,  # 4D spacetime
+                coordinates='cartesian',
+                dimension=4
+            )
+            
+            # Set the information processing rate
+            info_current.info_rate = self.gamma
+            
+            logger.debug("Information current tensor computed successfully")
+            return info_current
+            
+        except Exception as e:
+            logger.error(f"Error computing information current tensor: {str(e)}", exc_info=True)
+            raise
     
     def compute_metrics(self):
         """Compute the spacetime metric at each grid point."""
