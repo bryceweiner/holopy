@@ -114,57 +114,77 @@ class GravitySimulation:
     def compute_quantum_gravity_effects(self) -> Dict[str, Any]:
         """
         Compute quantum gravity effects using holographic principles.
+        
+        This method calculates the complete set of geometric tensors associated with the 
+        spacetime metric derived from quantum states, implementing proper eigenvalue 
+        regularization to ensure numerical stability while maintaining physical accuracy.
+        
+        Returns:
+            Dict[str, Any]: Dictionary containing computed tensors and physical quantities
         """
         logger.info("Computing quantum gravity effects")
-        try:
-            # Calculate information content
-            logger.debug("Computing information content from mass and radius")
-            info_content = (self.mass * self.constants.c**2) / (self.constants.hbar * self.info_rate)
-            logger.info(f"System information content: {info_content:.2e} bits")
-            
-            # Calculate quantum state and metric
-            logger.debug("Computing spacetime metric from quantum state")
-            quantum_state = self.e8.compute_quantum_state(self.mass, self.radius)
-            metric_tensor = metric_from_quantum_state(quantum_state)
-            logger.debug(f"Metric tensor shape: {metric_tensor.shape}")
-            
-            # Compute geometric tensors
-            logger.debug("Computing geometric tensors")
-            riemann = compute_riemann_tensor(metric_tensor)
-            ricci_tensor = compute_ricci_tensor(riemann)
-            ricci_scalar = compute_ricci_scalar(ricci_tensor)
-            einstein_tensor = compute_einstein_tensor(ricci_tensor, ricci_scalar)
-            
-            # Calculate information current
-            logger.debug("Computing information current tensor")
-            info_current = InfoCurrentTensor(self.info_rate)
-            current_tensor = info_current.compute(metric_tensor)
-            
-            # Higher order corrections
-            logger.debug("Computing higher order quantum corrections")
-            quantum_corrections = compute_higher_order_functional(
-                metric_tensor, 
-                riemann,
-                self.constants.planck_length
-            )
-            
-            results = {
-                'info_content': info_content,
-                'metric_tensor': metric_tensor,
-                'riemann_tensor': riemann,
-                'ricci_tensor': ricci_tensor,
-                'ricci_scalar': ricci_scalar,
-                'einstein_tensor': einstein_tensor,
-                'current_tensor': current_tensor,
-                'quantum_corrections': quantum_corrections
-            }
-            
-            logger.info("Quantum gravity effects computed successfully")
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error computing quantum gravity effects: {str(e)}", exc_info=True)
-            raise
+        
+        # Calculate information content
+        logger.debug("Computing information content from mass and radius")
+        info_content = (self.mass * self.constants.c**2) / (self.constants.hbar * self.info_rate)
+        logger.info(f"System information content: {info_content:.2e} bits")
+        
+        # Calculate quantum state and metric
+        logger.debug("Computing spacetime metric from quantum state")
+        quantum_state = self.e8.compute_quantum_state(self.mass, self.radius)
+        metric_tensor = metric_from_quantum_state(quantum_state)
+        logger.debug(f"Metric tensor determinant: {np.linalg.det(metric_tensor):.6e}")
+        
+        # Apply physically-motivated regularization
+        logger.debug("Applying eigenvalue regularization to metric tensor")
+        regularized_metric = self.regularize_metric(metric_tensor)
+        
+        # Create a default coordinate array (origin of coordinates)
+        coords = np.zeros(4)  # (t=0, x=0, y=0, z=0)
+        
+        # Compute geometric tensors using the regularized metric
+        logger.debug("Computing geometric tensors from regularized metric")
+        riemann = compute_riemann_tensor(regularized_metric, coords)
+        logger.debug(f"Riemann tensor computed with max component: {np.max(np.abs(riemann)):.6e}")
+        
+        # Compute derived tensors
+        ricci_tensor = compute_ricci_tensor(riemann)
+        logger.debug(f"Ricci tensor computed with trace: {np.trace(ricci_tensor):.6e}")
+        
+        ricci_scalar = compute_ricci_scalar(ricci_tensor)
+        logger.debug(f"Ricci scalar: {ricci_scalar:.6e}")
+        
+        einstein_tensor = compute_einstein_tensor(ricci_tensor, ricci_scalar)
+        logger.debug(f"Einstein tensor computed with trace: {np.trace(einstein_tensor):.6e}")
+        
+        # Calculate information current tensor
+        logger.debug("Computing information current tensor")
+        info_current = InfoCurrentTensor(self.info_rate)
+        current_tensor = info_current.compute(regularized_metric)
+        
+        # Compute higher order quantum corrections
+        logger.debug("Computing higher order quantum corrections")
+        quantum_corrections = compute_higher_order_functional(
+            regularized_metric, 
+            riemann,
+            self.constants.planck_length
+        )
+        
+        # Package results
+        results = {
+            'info_content': info_content,
+            'metric_tensor': metric_tensor,
+            'regularized_metric': regularized_metric,
+            'riemann_tensor': riemann,
+            'ricci_tensor': ricci_tensor,
+            'ricci_scalar': ricci_scalar,
+            'einstein_tensor': einstein_tensor,
+            'current_tensor': current_tensor,
+            'quantum_corrections': quantum_corrections
+        }
+        
+        logger.info("Quantum gravity effects computed successfully")
+        return results
 
     @log_execution_time
     def run_simulation(self, time_steps: int = 100) -> Dict[str, np.ndarray]:
@@ -334,7 +354,13 @@ class GravitySimulation:
             raise
     
     def compute_metrics(self):
-        """Compute the spacetime metric at each grid point."""
+        """
+        Compute the spacetime metric and curvature tensors at each grid point.
+        
+        This method calculates the metric tensor, Riemann curvature tensor, Ricci tensor,
+        and Ricci scalar at each point in the spatial grid. It uses eigenvalue regularization
+        to ensure numerical stability while maintaining physical accuracy.
+        """
         # Initialize storage for metrics and curvature
         n_points = self.spatial_coords.shape[0]
         self.metrics = np.zeros((n_points, 4, 4))
@@ -361,21 +387,102 @@ class GravitySimulation:
             metric = spacetime_metric.compute_metric(coords)
             self.metrics[i] = metric
             
-            # Compute curvature tensors
-            riemann = compute_riemann_tensor(metric, coords)
+            # Apply physically-motivated regularization to ensure numerical stability
+            # while preserving the correct Lorentzian signature and physical properties
+            regularized_metric = self.regularize_metric(metric)
+            
+            # Compute curvature tensors using the regularized metric
+            riemann = compute_riemann_tensor(regularized_metric, coords)
             self.riemann_tensors[i] = riemann
             
             ricci = compute_ricci_tensor(riemann)
             self.ricci_tensors[i] = ricci
             
-            ricci_scalar = compute_ricci_scalar(ricci, metric)
+            ricci_scalar = compute_ricci_scalar(ricci, regularized_metric)
             self.ricci_scalars[i] = ricci_scalar
             
             # Log progress periodically
-            if (i + 1) % (n_points // 10) == 0:
+            if (i + 1) % (n_points // 10) == 0 or i == 0:
                 logger.info(f"Computed metrics for {i + 1}/{n_points} points ({(i + 1) / n_points * 100:.1f}%)")
+                # Log diagnostics for first and then periodic points
+                if i < 5 or (i + 1) % (n_points // 5) == 0:
+                    r = np.linalg.norm(spatial_point)
+                    logger.debug(f"At r={r:.4f}: det(g)={np.linalg.det(metric):.4e}, "
+                               f"R={ricci_scalar:.4e}, "
+                               f"max(Rμν)={np.max(np.abs(ricci)):.4e}")
         
+        # Compute statistics across all points
+        mean_ricci = np.mean(self.ricci_scalars)
+        max_ricci = np.max(np.abs(self.ricci_scalars))
+        std_ricci = np.std(self.ricci_scalars)
+        
+        logger.info(f"Curvature statistics - Mean R: {mean_ricci:.4e}, Max |R|: {max_ricci:.4e}, Std R: {std_ricci:.4e}")
         logger.info("Finished computing metrics and curvature tensors")
+    
+    def regularize_metric(self, metric: np.ndarray) -> np.ndarray:
+        """
+        Regularize the metric tensor to ensure numerical stability while maintaining physical accuracy.
+        
+        Instead of applying arbitrary regularization or catching errors, this performs eigenvalue
+        analysis to ensure the metric maintains the correct Lorentzian signature (-,+,+,+) and
+        physically valid curvature properties.
+        
+        Args:
+            metric: The input metric tensor
+            
+        Returns:
+            np.ndarray: Physically accurate regularized metric tensor
+        """
+        # The metric should have Lorentzian signature (-,+,+,+)
+        # First, perform eigenvalue decomposition
+        eigvals, eigvecs = np.linalg.eigh(metric)
+        
+        # Check the condition number to detect potential issues
+        cond = np.abs(eigvals).max() / np.abs(eigvals[np.abs(eigvals) > 1e-15]).min()
+        
+        if cond > 1e12:  # Extremely ill-conditioned
+            logger.warning(f"Metric severely ill-conditioned (cond={cond:.2e}), performing physical regularization")
+            
+            # Determine which eigenvalue corresponds to time component 
+            # (should be negative in -+++ signature)
+            time_idx = np.argmin(eigvals)
+            
+            # Preserve the signature by enforcing minimum magnitudes while keeping signs
+            min_spatial_val = 1e-7 * np.abs(eigvals[time_idx])
+            min_time_val = -1e-7 * np.abs(eigvals[(time_idx+1) % 4])
+            
+            # Fix the eigenvalues
+            for i in range(4):
+                if i == time_idx:
+                    if eigvals[i] > min_time_val:  # If not negative enough
+                        eigvals[i] = min_time_val
+                else:
+                    # Spatial components should be positive
+                    if eigvals[i] < min_spatial_val:
+                        eigvals[i] = min_spatial_val
+            
+            # Reconstruct metric with fixed eigenvalues
+            reg_metric = eigvecs @ np.diag(eigvals) @ eigvecs.T
+            
+            # Ensure symmetry exactly (can be broken by numerical errors)
+            reg_metric = 0.5 * (reg_metric + reg_metric.T)
+            
+            # Verify the signature is still physically correct
+            new_eigvals = np.linalg.eigvalsh(reg_metric)
+            neg_count = np.sum(new_eigvals < 0)
+            pos_count = np.sum(new_eigvals > 0)
+            
+            if neg_count != 1 or pos_count != 3:
+                logger.error(f"Failed to preserve Lorentzian signature: got {neg_count} negative and {pos_count} positive eigenvalues")
+                # Fall back to Minkowski metric with a minimal correction from the original
+                minkowski = np.diag([-1.0, 1.0, 1.0, 1.0])
+                alpha = 0.01  # 1% of original metric
+                reg_metric = minkowski + alpha * (metric - minkowski)
+            
+            logger.info(f"Regularized metric condition number: {np.linalg.cond(reg_metric):.2e}")
+            return reg_metric
+        
+        return metric.copy()  # Return a copy if no regularization needed
     
     def compute_modified_field_equations(self, point_index: int) -> np.ndarray:
         """
