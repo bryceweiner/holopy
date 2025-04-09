@@ -160,3 +160,4 @@ output/
 logs/
 holopy.egg-info/
 .benchmarks/
+examples/figures/
