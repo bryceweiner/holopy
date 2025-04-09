@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import logging
 import os
 from typing import Optional, Dict, List, Tuple, Any
+import time
+from datetime import datetime
 
 from holopy.constants.physical_constants import PhysicalConstants
 from holopy.gravity.einstein_field import ModifiedEinsteinField
@@ -18,73 +20,213 @@ from holopy.gravity.spacetime import (
     compute_einstein_tensor
 )
 
-# Configure logging
+# Configure logging with more detailed formatting
 logger = logging.getLogger('holopy')
 if not logger.handlers:
     logger.setLevel(logging.INFO)
     logger.propagate = False
     if os.environ.get('HOLOPY_WORKER') != '1':
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
-        logger.addHandler(handler)
+        # Create console handler with detailed formatting
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(
+            logging.Formatter(
+                '[%(asctime)s] %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+        )
+        logger.addHandler(console_handler)
+        
+        # Create file handler for persistent logging
+        log_dir = 'gravity_simulation/logs'
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        log_file = os.path.join(log_dir, f'gravity_sim_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(
+            logging.Formatter(
+                '[%(asctime)s] %(levelname)s [%(filename)s:%(lineno)d] - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+        )
+        logger.addHandler(file_handler)
+        
         os.environ['HOLOPY_WORKER'] = '1'
+
+# Add debug level logging for development
+if os.environ.get('HOLOPY_DEBUG'):
+    logger.setLevel(logging.DEBUG)
+    logger.debug("Debug logging enabled")
+
+# Timer decorator for performance logging
+def log_execution_time(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        logger.debug(f"Starting {func.__name__}")
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        logger.debug(f"Completed {func.__name__} in {end_time - start_time:.3f} seconds")
+        return result
+    return wrapper
 
 class GravitySimulation:
     """
-    Simulation of gravitational field for a particle.
-    
-    This class implements a physically accurate simulation of the gravitational
-    field around a small particle, using the holographic gravity framework.
+    Simulates gravity using holographic principles and information theory.
     """
-    
-    def __init__(
-        self,
-        mass: float,              # Mass in grams
-        radius: float,            # Radius in centimeters
-        grid_size: int = 50,      # Number of points in spatial grid
-        sim_radius: float = 10.0  # Simulation radius in centimeters
-    ):
+    @log_execution_time
+    def __init__(self, mass: float = 1.0, radius: float = 1.0, info_rate: float = 1e6, grid_size: int = 40):
         """
-        Initialize the gravity simulation.
+        Initialize gravity simulation with given parameters.
+        """
+        logger.info(f"Initializing GravitySimulation with mass={mass}, radius={radius}, info_rate={info_rate}, grid_size={grid_size}")
+        self.mass = mass
+        self.radius = radius
+        self.info_rate = info_rate
+        self.grid_size = grid_size
+        self.constants = PhysicalConstants()
         
-        Args:
-            mass: Mass of the particle in grams
-            radius: Radius of the particle in centimeters
-            grid_size: Number of points in the spatial grid (default 50)
-            sim_radius: Radius of the simulation space in centimeters (default 10.0)
-        """
-        # Convert to SI units
+        # Convert to SI units for calculations
         self.mass_kg = mass / 1000.0  # Convert g to kg
         self.radius_m = radius / 100.0  # Convert cm to m
-        self.sim_radius_m = sim_radius / 100.0  # Convert cm to m
         
-        # Store original units for reference
-        self.mass_g = mass
-        self.radius_cm = radius
-        self.sim_radius_cm = sim_radius
-        
-        # Grid parameters
-        self.grid_size = grid_size
-        
-        # Physical constants
-        self.constants = PhysicalConstants()
+        # Info processing rate (gamma)
         self.gamma = self.constants.gamma
         
-        # Initialize E8×E8 heterotic structure for accurate physical calculations
-        self.e8_structure = E8E8Heterotic()
+        # Initialize simulation components
+        logger.debug("Initializing E8 heterotic string theory components")
+        self.e8 = E8E8Heterotic()
         
-        # Initialize spatial grid
-        self.initialize_grid()
+        logger.debug("Initializing information spacetime metric")
+        self.metric = InfoSpacetimeMetric()
         
-        # Initialize metric and curvature storage
-        self.metrics = None
-        self.riemann_tensors = None
-        self.ricci_tensors = None
-        self.ricci_scalars = None
+        # Create default metric and energy-momentum for Einstein field
+        default_metric = np.eye(4)
+        default_energy_momentum = np.zeros((4, 4))
         
-        logger.info(f"Initialized gravity simulation for {mass}g particle with radius {radius}cm")
-        logger.info(f"Information processing rate γ: {self.gamma:.6e} s^-1")
+        logger.debug("Initializing modified Einstein field equations")
+        self.einstein_field = ModifiedEinsteinField(
+            metric=default_metric,
+            energy_momentum=default_energy_momentum
+        )
         
+        logger.info("Gravity simulation initialized successfully")
+
+    @log_execution_time
+    def compute_quantum_gravity_effects(self) -> Dict[str, Any]:
+        """
+        Compute quantum gravity effects using holographic principles.
+        """
+        logger.info("Computing quantum gravity effects")
+        try:
+            # Calculate information content
+            logger.debug("Computing information content from mass and radius")
+            info_content = (self.mass * self.constants.c**2) / (self.constants.hbar * self.info_rate)
+            logger.info(f"System information content: {info_content:.2e} bits")
+            
+            # Calculate quantum state and metric
+            logger.debug("Computing spacetime metric from quantum state")
+            quantum_state = self.e8.compute_quantum_state(self.mass, self.radius)
+            metric_tensor = metric_from_quantum_state(quantum_state)
+            logger.debug(f"Metric tensor shape: {metric_tensor.shape}")
+            
+            # Compute geometric tensors
+            logger.debug("Computing geometric tensors")
+            riemann = compute_riemann_tensor(metric_tensor)
+            ricci_tensor = compute_ricci_tensor(riemann)
+            ricci_scalar = compute_ricci_scalar(ricci_tensor)
+            einstein_tensor = compute_einstein_tensor(ricci_tensor, ricci_scalar)
+            
+            # Calculate information current
+            logger.debug("Computing information current tensor")
+            info_current = InfoCurrentTensor(self.info_rate)
+            current_tensor = info_current.compute(metric_tensor)
+            
+            # Higher order corrections
+            logger.debug("Computing higher order quantum corrections")
+            quantum_corrections = compute_higher_order_functional(
+                metric_tensor, 
+                riemann,
+                self.constants.planck_length
+            )
+            
+            results = {
+                'info_content': info_content,
+                'metric_tensor': metric_tensor,
+                'riemann_tensor': riemann,
+                'ricci_tensor': ricci_tensor,
+                'ricci_scalar': ricci_scalar,
+                'einstein_tensor': einstein_tensor,
+                'current_tensor': current_tensor,
+                'quantum_corrections': quantum_corrections
+            }
+            
+            logger.info("Quantum gravity effects computed successfully")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error computing quantum gravity effects: {str(e)}", exc_info=True)
+            raise
+
+    @log_execution_time
+    def run_simulation(self, time_steps: int = 100) -> Dict[str, np.ndarray]:
+        """
+        Run the gravity simulation for specified time steps.
+        """
+        logger.info(f"Starting gravity simulation with {time_steps} time steps")
+        try:
+            results = {
+                'time': np.zeros(time_steps),
+                'energy': np.zeros(time_steps),
+                'entropy': np.zeros(time_steps),
+                'curvature': np.zeros(time_steps)
+            }
+            
+            for t in range(time_steps):
+                if t % 10 == 0:  # Log progress every 10 steps
+                    logger.info(f"Simulation progress: {t}/{time_steps} steps ({t/time_steps*100:.1f}%)")
+                
+                # Compute quantum effects for current timestep
+                quantum_effects = self.compute_quantum_gravity_effects()
+                
+                # Store results
+                results['time'][t] = t * self.constants.planck_time
+                results['energy'][t] = np.mean(np.abs(quantum_effects['einstein_tensor']))
+                results['entropy'][t] = self.calculate_entropy(quantum_effects)
+                results['curvature'][t] = np.mean(np.abs(quantum_effects['ricci_scalar']))
+                
+                logger.debug(f"Step {t}: Energy={results['energy'][t]:.2e}, "
+                           f"Entropy={results['entropy'][t]:.2e}, "
+                           f"Curvature={results['curvature'][t]:.2e}")
+            
+            logger.info("Simulation completed successfully")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error during simulation: {str(e)}", exc_info=True)
+            raise
+
+    @log_execution_time
+    def calculate_entropy(self, quantum_effects: Dict[str, Any]) -> float:
+        """
+        Calculate the holographic entropy from quantum effects.
+        """
+        logger.debug("Calculating holographic entropy")
+        try:
+            # Area in Planck units
+            area = 4 * np.pi * self.radius**2 / self.constants.planck_length**2
+            
+            # Quantum corrections
+            corrections = np.mean(np.abs(quantum_effects['quantum_corrections']))
+            
+            # Holographic entropy (Bekenstein-Hawking with quantum corrections)
+            entropy = (area / 4) * (1 + corrections)
+            
+            logger.debug(f"Calculated entropy: {entropy:.2e}")
+            return entropy
+            
+        except Exception as e:
+            logger.error(f"Error calculating entropy: {str(e)}", exc_info=True)
+            raise
+
     def initialize_grid(self):
         """Initialize the spatial grid for the simulation."""
         # Create a spherical grid around the origin
@@ -92,8 +234,8 @@ class GravitySimulation:
         
         # Radial coordinates (logarithmically spaced to focus on near-field)
         r_values = np.logspace(
-            np.log10(self.radius_m * 1.01),  # Start just outside the particle
-            np.log10(self.sim_radius_m),     # End at simulation boundary
+            np.log10(self.radius * 1.01),  # Start just outside the particle
+            np.log10(self.radius * 10.0),     # End at simulation boundary
             self.grid_size
         )
         
@@ -139,10 +281,10 @@ class GravitySimulation:
             callable: Function that returns matter density at a point
         """
         # Calculate particle volume
-        volume = (4/3) * np.pi * self.radius_m**3
+        volume = (4/3) * np.pi * self.radius**3
         
         # Calculate particle density
-        particle_density = self.mass_kg / volume
+        particle_density = self.mass / volume
         
         # Create density function
         def density_function(point: np.ndarray) -> float:
@@ -151,12 +293,12 @@ class GravitySimulation:
             r = np.linalg.norm(point)
             
             # Return density based on distance
-            if r <= self.radius_m:
+            if r <= self.radius:
                 return particle_density
             else:
                 # Exponentially decreasing density outside the particle
                 # to account for quantum effects
-                return particle_density * np.exp(-(r - self.radius_m) / (self.radius_m * 0.1))
+                return particle_density * np.exp(-(r - self.radius) / (self.radius * 0.1))
         
         return density_function
     
@@ -174,7 +316,7 @@ class GravitySimulation:
         info_current = InfoCurrentTensor.from_density(
             density_function=density_func,
             grid_size=self.grid_size,
-            domain=[(-self.sim_radius_m, self.sim_radius_m)] * 4,  # 4D spacetime
+            domain=[(-self.radius, self.radius)] * 4,  # 4D spacetime
             coordinates='cartesian',
             dimension=4,
             gamma=self.gamma
@@ -196,7 +338,7 @@ class GravitySimulation:
         
         # Create spacetime metric calculator
         spacetime_metric = InfoSpacetimeMetric(
-            e8_structure=self.e8_structure,
+            e8_structure=self.e8,
             info_current=info_current
         )
         
@@ -299,12 +441,12 @@ class GravitySimulation:
             r = np.linalg.norm(point)
             
             # Inside the particle
-            if r < self.radius_m:
+            if r < self.radius:
                 # Potential inside a uniform sphere
-                potential[i] = -G * self.mass_kg * (3 * self.radius_m**2 - r**2) / (2 * self.radius_m**3)
+                potential[i] = -G * self.mass * (3 * self.radius**2 - r**2) / (2 * self.radius**3)
             else:
                 # Potential outside (standard Newtonian)
-                potential[i] = -G * self.mass_kg / r
+                potential[i] = -G * self.mass / r
         
         return potential
     
@@ -410,7 +552,7 @@ class GravitySimulation:
         plt.legend()
         
         plt.tight_layout()
-        plt.savefig('gravity_simulation_results.png', dpi=300)
+        plt.savefig('gravity_simulation/figures/gravity_simulation_results.png', dpi=300)
         plt.show()
         
         logger.info("Saved plot to 'gravity_simulation_results.png'")
@@ -423,19 +565,19 @@ class GravitySimulation:
             self.compute_metrics()
         
         # Calculate classical Schwarzschild radius for comparison
-        r_s = 2 * self.constants.G * self.mass_kg / self.constants.c**2
+        r_s = 2 * self.constants.G * self.mass / self.constants.c**2
         
         # Calculate holographic correction factor based on information processing rate
         gamma_factor = self.constants.gamma / self.constants.hubble_parameter
-        info_correction = 1 + gamma_factor * np.log(self.constants.l_p / self.radius_m)
+        info_correction = 1 + gamma_factor * np.log(self.constants.l_p / self.radius)
         
         # Estimate corrected Schwarzschild radius
         r_s_holographic = r_s * info_correction
         
         # Print results
         print("\n===== Gravity Simulation Results =====")
-        print(f"Particle mass: {self.mass_g} g ({self.mass_kg} kg)")
-        print(f"Particle radius: {self.radius_cm} cm ({self.radius_m} m)")
+        print(f"Particle mass: {self.mass} g ({self.mass_kg} kg)")
+        print(f"Particle radius: {self.radius} cm ({self.radius_m} m)")
         
         print("\nClassical gravitational parameters:")
         print(f"Newtonian gravitational field at surface: {self.constants.G * self.mass_kg / self.radius_m**2:.8e} m/s²")
@@ -457,8 +599,8 @@ class GravitySimulation:
         print(f"Ricci scalar (mean): {ricci_mean:.6e} m⁻²")
         
         # Calculate information properties
-        volume = (4/3) * np.pi * self.radius_m**3
-        surface_area = 4 * np.pi * self.radius_m**2
+        volume = (4/3) * np.pi * self.radius**3
+        surface_area = 4 * np.pi * self.radius**2
         
         # Maximum entropy (holographic bound)
         max_entropy = (surface_area * self.constants.c**3) / (4 * self.constants.G * self.constants.hbar)
@@ -475,21 +617,35 @@ class GravitySimulation:
 def main():
     """Main execution function."""
     # Create gravity simulation for a 1cm, 1g particle
+    logger.info("Starting gravity simulation main function")
     sim = GravitySimulation(
-        mass=1.0,       # 1 gram
-        radius=0.5,     # 1 cm diameter (0.5 cm radius)
-        grid_size=40,   # Grid resolution
-        sim_radius=50.0 # Simulation radius in cm
+        mass=1.0,      # 1 gram
+        radius=0.5,    # 0.5 cm radius
+        info_rate=1e6  # Information processing rate
     )
     
+    # Initialize the grid for visualization
+    logger.debug("Initializing simulation grid")
+    sim.initialize_grid()
+    
     # Compute metrics and curvature
+    logger.info("Computing metrics and curvature")
     sim.compute_metrics()
     
     # Print physical results
+    logger.info("Printing physical results")
     sim.print_physical_results()
     
+    # Run the quantum simulation
+    logger.info("Running quantum gravity simulation")
+    results = sim.run_simulation(time_steps=50)
+    
     # Plot gravitational field
+    logger.info("Plotting gravitational field")
     sim.plot_gravitational_field()
+    
+    logger.info("Simulation completed successfully")
+    return results
 
 
 if __name__ == "__main__":

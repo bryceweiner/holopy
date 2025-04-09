@@ -473,7 +473,7 @@ def simulate_photon_in_causal_patch():
 def create_waveform_evolution_plot(psi_evolution, t_points, x_values):
     """Create a 3D visualization of the waveform evolution over time."""
     # Create figures directory if it doesn't exist
-    figures_dir = os.path.join(os.path.dirname(__file__), 'figures')
+    figures_dir = os.path.join(os.path.dirname(__file__), 'photon_example/figures')
     os.makedirs(figures_dir, exist_ok=True)
     
     try:
