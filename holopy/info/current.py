@@ -8,7 +8,7 @@ foundation for the emergence of gravity from information dynamics.
 
 from typing import List, Tuple, Callable, Union, Optional
 import numpy as np
-from holopy.constants.physical_constants import PHYSICAL_CONSTANTS
+from holopy.constants.physical_constants import PhysicalConstants, PHYSICAL_CONSTANTS
 import logging
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ class InfoCurrentTensor:
         trace = np.trace(tensor)
         if np.abs(trace) > 1e-10:
             # Check for non-zero trace to avoid division by small values
-            gamma = PHYSICAL_CONSTANTS.get_gamma()
+            gamma = PhysicalConstants().get_gamma()
             scale_factor = np.sqrt(np.abs(trace) / gamma)
             density = principal_eigenvector * scale_factor
         else:
@@ -108,7 +108,7 @@ class InfoCurrentTensor:
             # second derivatives in each direction
             for mu in range(dimension):
                 if tensor[mu, mu] > 0:
-                    density[mu] = np.sqrt(tensor[mu, mu] / PHYSICAL_CONSTANTS.get_gamma())
+                    density[mu] = np.sqrt(tensor[mu, mu] / PhysicalConstants().get_gamma())
         
         # Ensure physical consistency with causal structure
         # Time component should always be non-negative in the physical frame
@@ -205,7 +205,7 @@ class InfoCurrentTensor:
         
         # Compute the information current tensor
         # J^μν = ∇^μ∇^νρ - γρ^μρ^ν
-        gamma = PHYSICAL_CONSTANTS.get_gamma()
+        gamma = PhysicalConstants().get_gamma()
         rho_dyadic = np.outer(density_vector, density_vector)
         tensor = hessian - gamma * rho_dyadic
         
@@ -276,7 +276,7 @@ class InfoCurrentTensor:
             # relationship to estimate it based on γρ^ν.
             
             # By the geometric identity: ∇_μ J^μν = γρ^ν
-            gamma = PHYSICAL_CONSTANTS.get_gamma()
+            gamma = PhysicalConstants().get_gamma()
             return gamma * self.density
         
         elif self.coordinates == 'spherical':
@@ -285,7 +285,7 @@ class InfoCurrentTensor:
             
             # Compute the divergence with connection coefficients
             divergence = np.zeros(self.dimension)
-            gamma = PHYSICAL_CONSTANTS.get_gamma()
+            gamma = PhysicalConstants().get_gamma()
             
             # First, compute the direct part: γρ^ν
             direct_part = gamma * self.density
@@ -332,7 +332,7 @@ class InfoCurrentTensor:
             # For other coordinate systems, default to the geometric identity
             # with a warning
             logger.warning(f"Coordinate system {self.coordinates} not fully implemented for divergence computation")
-            gamma = PHYSICAL_CONSTANTS.get_gamma()
+            gamma = PhysicalConstants().get_gamma()
             return gamma * self.density
 
 
@@ -375,7 +375,7 @@ if __name__ == "__main__":
     print(divergence)
     
     # Check conservation law: ∇_μ J^μν = γρ^ν
-    gamma = PHYSICAL_CONSTANTS.get_gamma()
+    gamma = PhysicalConstants().get_gamma()
     conservation_check = divergence - gamma * density
     print("\nConservation law check (should be near zero):")
     print(conservation_check) 
