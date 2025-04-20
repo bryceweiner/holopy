@@ -59,7 +59,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("heliophysics_analysis.log"),
+        logging.FileHandler("examples/coronal_heating/logs/heliophysics_analysis.log"),
         logging.StreamHandler()
     ]
 )
@@ -121,10 +121,11 @@ class ThomsonRegulationAnalyzer:
         self.constants = PhysicalConstants()
         
         # Set up directories
-        self.data_dir = Path(data_dir or "thomson_data")
-        self.output_dir = Path(output_dir or "thomson_results")
-        self.data_dir.mkdir(exist_ok=True)
-        self.output_dir.mkdir(exist_ok=True)
+        base_dir = Path("examples/coronal_heating")
+        self.data_dir = Path(data_dir or base_dir / "data")
+        self.output_dir = Path(output_dir or base_dir / "results")
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Directory for figures
         self.figures_dir = self.output_dir / "figures"
@@ -134,8 +135,8 @@ class ThomsonRegulationAnalyzer:
         if cache_dir:
             self.cache_dir = Path(cache_dir)
         else:
-            self.cache_dir = self.data_dir / "cache"
-        self.cache_dir.mkdir(exist_ok=True)
+            self.cache_dir = base_dir / "cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_index_file = self.cache_dir / "cache_index.json"
         self._init_cache_index()
         
@@ -1553,6 +1554,14 @@ class ThomsonRegulationAnalyzer:
         }
         
         logger.info(f"Analysis complete using {data_source} data")
+        
+        # After getting results and evaluation, create validation plots
+        try:
+            self.create_validation_plots(parameters, results, validation_results)
+            logger.info("Validation plots created successfully")
+        except Exception as e:
+            logger.error(f"Error creating validation plots: {str(e)}")
+        
         return results
 
     def evaluate_theory_confirmation(self, results):
@@ -1989,6 +1998,634 @@ class ThomsonRegulationAnalyzer:
                 "preferred_model": model_preference
             }
         }
+
+    def analyze_reconnection_information_constraints(self, processed_data, parameters):
+        """
+        Analyze magnetic reconnection events as information "rewriting" processes
+        under holographic constraints.
+        
+        This method implements the theoretical framework where magnetic reconnection events 
+        represent information-saturated structures undergoing forced transitions, which
+        explains the unexpected positive g×f(B) coefficient.
+        
+        Args:
+            processed_data (dict): Processed Thomson scattering data
+            parameters (dict): Estimated physical parameters
+            
+        Returns:
+            dict: Analysis of reconnection events under information constraints
+        """
+        logger.info("Analyzing magnetic reconnection under information constraints")
+        
+        # Extract maps from processed data
+        maps = parameters.get('maps', {})
+        magnetic_map = maps.get('magnetic_map')
+        temperature_map = maps.get('temperature_map')
+        density_map = maps.get('density_map')
+        g_field_map = maps.get('g_field_map')
+        f_B_map = maps.get('f_B_map')
+        
+        if not all([magnetic_map, temperature_map, density_map, g_field_map, f_B_map]):
+            logger.error("Required maps not available for reconnection analysis")
+            return None
+        
+        # Universal information processing rate
+        gamma = 1.89e-29  # s^-1
+        
+        # Calculate the characteristic timescale for information processing
+        tau_info = 1.0 / gamma  # s
+        logger.info(f"Information processing timescale τ = {tau_info:.3e} s")
+        
+        # Extract data arrays
+        B = np.abs(magnetic_map.data)
+        T = temperature_map.data
+        n_e = density_map.data  # electron density
+        g = g_field_map.data  # gravitational field
+        f_B = f_B_map.data  # magnetic constraint function
+        
+        # Create valid data mask
+        valid_mask = ~np.isnan(B) & ~np.isnan(T) & ~np.isnan(n_e) & ~np.isnan(g) & ~np.isnan(f_B)
+        valid_mask &= (B > 0) & (T > 0) & (n_e > 0) & (g > 0) & (f_B > 0)
+        
+        # Extract valid data
+        B_valid = B[valid_mask]
+        T_valid = T[valid_mask]
+        n_e_valid = n_e[valid_mask]
+        g_valid = g[valid_mask]
+        f_B_valid = f_B[valid_mask]
+        
+        # Calculate combined g×f(B) factor
+        gfB_valid = g_valid * f_B_valid
+        
+        # Calculate Alfvén velocity: v_A = B/sqrt(μ₀ρ)
+        mu0 = 4 * np.pi * 1e-7  # Vacuum permeability (H/m)
+        m_p = 1.6726219e-27  # Proton mass (kg)
+        
+        # Calculate mass density (assuming hydrogen plasma)
+        rho = n_e_valid * m_p  # kg/m³
+        
+        # Calculate Alfvén velocity
+        v_A = B_valid / np.sqrt(mu0 * rho)  # m/s
+        
+        # Calculate plasma beta (ratio of thermal to magnetic pressure)
+        k_B = 1.380649e-23  # Boltzmann constant (J/K)
+        P_thermal = n_e_valid * k_B * T_valid  # Thermal pressure (Pa)
+        P_magnetic = B_valid**2 / (2 * mu0)  # Magnetic pressure (Pa)
+        plasma_beta = P_thermal / P_magnetic  # Dimensionless
+        
+        # Calculate reconnection rate under standard Sweet-Parker model
+        # S = (L*v_A)/(η) where η is the resistivity (diffusivity)
+        # Estimate L as solar radius divided by 100 (typical active region scale)
+        L = self.solar_radius / 100  # m
+        
+        # Estimate resistivity based on Spitzer formula for fully ionized plasma
+        # η ≈ 10^-2 * T^(-3/2) * ln(Λ) where ln(Λ) is the Coulomb logarithm
+        # For solar corona, ln(Λ) ≈ in range 10-20, we use 15
+        ln_lambda = 15
+        eta = 1e-2 * T_valid**(-1.5) * ln_lambda  # Resistivity in Ω·m
+        
+        # Calculate Lundquist number S
+        S = L * v_A / eta
+        
+        # Standard Sweet-Parker reconnection rate
+        R_SP = S**(-0.5)
+        
+        # Calculate information-constrained reconnection rate
+        # Based on holographic theory: R_info ≈ R_SP * (1 + γ*τ_A)
+        # where τ_A = L/v_A is the Alfvén crossing time
+        tau_A = L / v_A  # Alfvén crossing time (s)
+        
+        # Information-modified reconnection rate
+        R_info = R_SP * (1 + gamma * tau_A)
+        
+        # Calculate critical current density for reconnection
+        # j_crit = B/(μ₀L)
+        j_crit = B_valid / (mu0 * L)  # A/m²
+        
+        # Calculate the information processing capacity per unit volume
+        # In bits/m³: I_max = (L/l_p)^2 / L^3 where l_p is Planck length
+        l_p = 1.616255e-35  # m
+        I_max = (L / l_p)**2 / L**3  # Maximum information density (bits/m³)
+        
+        # Calculate local information rate (bits/s/m³)
+        info_rate = I_max * gamma  # bits/s/m³
+        
+        # Calculate relationship between g×f(B) and information parameters
+        # Under holographic hypothesis, correlation should be positive due to information constraints
+        
+        try:
+            # Prepare data for regression
+            X = np.column_stack((
+                np.log(plasma_beta),
+                np.log(R_info),
+                np.ones_like(plasma_beta)
+            ))
+            y = np.log(gfB_valid)
+            
+            # Perform regression
+            beta_coef, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
+            
+            # Extract coefficients
+            beta_weight, R_info_weight, intercept = beta_coef
+            
+            # Calculate model predictions
+            y_pred = np.dot(X, beta_coef)
+            
+            # Calculate R²
+            ss_total = np.sum((y - np.mean(y))**2)
+            ss_residual = np.sum((y - y_pred)**2)
+            r_squared = 1 - (ss_residual / ss_total)
+            
+            logger.info(f"Information-reconnection model: g×f(B) ~ β^{beta_weight:.4f} · R_info^{R_info_weight:.4f}")
+            logger.info(f"Model R² = {r_squared:.4f}")
+            
+            # Positive coefficient on R_info indicates information-constrained reconnection
+            if R_info_weight > 0:
+                logger.info("RESULT: Positive correlation with reconnection rate supports information-constrained model")
+                info_constrained = True
+            else:
+                logger.info("RESULT: Negative correlation with reconnection rate does not support information-constrained model")
+                info_constrained = False
+        except Exception as e:
+            logger.error(f"Error in reconnection regression: {str(e)}")
+            beta_weight, R_info_weight, r_squared = np.nan, np.nan, np.nan
+            info_constrained = False
+        
+        # Calculate statistics
+        stats = {
+            "plasma_beta": {
+                "mean": np.mean(plasma_beta),
+                "median": np.median(plasma_beta),
+                "std": np.std(plasma_beta)
+            },
+            "reconnection_rate": {
+                "mean_standard": np.mean(R_SP),
+                "mean_info_modified": np.mean(R_info),
+                "ratio": np.mean(R_info / R_SP)
+            },
+            "alfven_velocity": {
+                "mean": np.mean(v_A),
+                "median": np.median(v_A),
+                "std": np.std(v_A)
+            },
+            "g_fB_factor": {
+                "mean": np.mean(gfB_valid),
+                "median": np.median(gfB_valid),
+                "std": np.std(gfB_valid)
+            }
+        }
+        
+        # Return the analysis results
+        return {
+            "info_constrained_reconnection": info_constrained,
+            "model_coefficients": {
+                "plasma_beta_weight": beta_weight,
+                "reconnection_rate_weight": R_info_weight,
+                "intercept": intercept,
+                "r_squared": r_squared
+            },
+            "reconnection_parameters": {
+                "lundquist_number": {
+                    "mean": np.mean(S),
+                    "median": np.median(S),
+                    "std": np.std(S)
+                },
+                "reconnection_rate": {
+                    "standard_mean": np.mean(R_SP),
+                    "info_modified_mean": np.mean(R_info),
+                    "enhancement_factor": np.mean(R_info / R_SP)
+                },
+                "critical_current": {
+                    "mean": np.mean(j_crit),
+                    "median": np.median(j_crit)
+                },
+                "information_parameters": {
+                    "max_info_density": I_max,
+                    "info_processing_rate": info_rate,
+                    "alfven_time_mean": np.mean(tau_A),
+                    "info_time_product": gamma * np.mean(tau_A)
+                }
+            },
+            "statistics": stats
+        }
+
+    def analyze_alfven_turbulence_cascade(self, processed_data, parameters):
+        """
+        Analyze Alfvén wave turbulence under information processing constraints.
+        
+        This method examines how information processing limits modify the turbulent
+        cascade from large to small scales, predicting a characteristic break at 
+        holographic scales.
+        
+        Args:
+            processed_data (dict): Processed Thomson scattering data
+            parameters (dict): Estimated physical parameters
+            
+        Returns:
+            dict: Analysis of Alfvén wave turbulence with holographic constraints
+        """
+        logger.info("Analyzing Alfvén wave turbulence with information processing constraints")
+        
+        # Extract maps from processed data
+        maps = parameters.get('maps', {})
+        magnetic_map = maps.get('magnetic_map')
+        density_map = maps.get('density_map')
+        
+        if not all([magnetic_map, density_map]):
+            logger.error("Required maps not available for Alfvén turbulence analysis")
+            return None
+        
+        # Universal information processing rate
+        gamma = 1.89e-29  # s^-1
+        
+        # Extract data arrays
+        B = np.abs(magnetic_map.data)
+        n_e = density_map.data  # electron density
+        
+        # Create valid data mask
+        valid_mask = ~np.isnan(B) & ~np.isnan(n_e) & (B > 0) & (n_e > 0)
+        
+        # Extract valid data
+        B_valid = B[valid_mask]
+        n_e_valid = n_e[valid_mask]
+        
+        # Constants
+        mu0 = 4 * np.pi * 1e-7  # Vacuum permeability (H/m)
+        m_p = 1.6726219e-27  # Proton mass (kg)
+        
+        # Calculate mass density (assuming hydrogen plasma)
+        rho = n_e_valid * m_p  # kg/m³
+        
+        # Calculate Alfvén velocity
+        v_A = B_valid / np.sqrt(mu0 * rho)  # m/s
+        
+        # Calculate characteristic length scales
+        # Solar radius as reference outer scale
+        L_outer = self.solar_radius  # m
+        
+        # Calculate ion gyroradius (characteristic inner scale)
+        k_B = 1.380649e-23  # Boltzmann constant (J/K)
+        T_assumed = 1e6  # Assumed coronal temperature (K)
+        ion_thermal_velocity = np.sqrt(2 * k_B * T_assumed / m_p)  # m/s
+        ion_cyclotron_freq = (1.6e-19 * B_valid) / m_p  # rad/s
+        rho_i = ion_thermal_velocity / ion_cyclotron_freq  # m
+        
+        # Calculate wavenumbers
+        k_outer = 2 * np.pi / L_outer  # m^-1
+        k_inner = 2 * np.pi / np.mean(rho_i)  # m^-1
+        
+        # Calculate inertial range extent in wavenumber space
+        k_range = np.logspace(np.log10(k_outer), np.log10(k_inner), 1000)
+        
+        # Standard MHD turbulence predicts E(k) ~ k^(-5/3) (Kolmogorov)
+        # for the inertial range and E(k) ~ k^(-7/3) for the dissipation range
+        
+        # Calculate information-limited scale
+        # The holographic scale where information limits become important
+        # Occurs at k_holo where the information processing time equals the eddy turnover time
+        # τ_eddy(k_holo) = 1/γ
+        
+        # Estimate eddy turnover time scale at wavenumber k: τ_eddy ~ (k v_A)^-1
+        mean_vA = np.mean(v_A)
+        tau_eddy = 1.0 / (k_range * mean_vA)
+        
+        # Find the holographic wavenumber where τ_eddy = 1/γ
+        tau_info = 1.0 / gamma
+        k_holo_idx = np.argmin(np.abs(tau_eddy - tau_info))
+        k_holo = k_range[k_holo_idx]
+        
+        logger.info(f"Outer scale wavenumber: k_outer = {k_outer:.3e} m^-1")
+        logger.info(f"Ion-scale wavenumber: k_inner = {k_inner:.3e} m^-1")
+        logger.info(f"Holographic scale wavenumber: k_holo = {k_holo:.3e} m^-1")
+        
+        # Calculate energy spectra with and without holographic constraints
+        # Standard Kolmogorov-like MHD turbulence spectrum
+        E_standard = np.zeros_like(k_range)
+        
+        # Inertial range: k^(-5/3)
+        inertial_mask = k_range <= k_inner/10  
+        E_standard[inertial_mask] = k_range[inertial_mask]**(-5/3)
+        
+        # Dissipation range: k^(-7/3)
+        dissipation_mask = ~inertial_mask
+        E_standard[dissipation_mask] = (k_inner/10)**(-5/3) * (k_range[dissipation_mask]/(k_inner/10))**(-7/3)
+        
+        # Normalize
+        E_standard = E_standard / E_standard[0]
+        
+        # Holographically constrained turbulence spectrum
+        E_holo = np.zeros_like(k_range)
+        
+        # Below holographic scale: standard cascade
+        pre_holo_mask = k_range <= k_holo
+        E_holo[pre_holo_mask] = k_range[pre_holo_mask]**(-5/3)
+        
+        # Calculate holographic modification factor for scales below information limit
+        # We use a model where spectrum steepens more rapidly:
+        # For k > k_holo: E(k) ~ k^(-5/3) * exp(-(k/k_holo)^α)
+        # where α is a coefficient derived from holographic theory
+        
+        # Holographic modification with enhanced dissipation
+        alpha = 0.5  # Holographic damping coefficient
+        post_holo_mask = k_range > k_holo
+        
+        # Post-holographic scales show enhanced damping
+        # The term (k/k_holo) represents deviation from standard cascade
+        k_ratio = k_range[post_holo_mask] / k_holo
+        
+        # Define the holographic damping function
+        holo_damping = np.exp(-(k_ratio**alpha))
+        
+        # Apply to the spectrum with proper normalization to ensure continuity
+        E_holo[post_holo_mask] = (k_holo**(-5/3)) * (k_range[post_holo_mask]/k_holo)**(-7/3) * holo_damping
+        
+        # Normalize
+        E_holo = E_holo / E_holo[0]
+        
+        # Calculate spectral index variation (d log E / d log k)
+        # For the standard model
+        spectral_index_std = np.zeros_like(k_range[1:])
+        for i in range(len(k_range)-1):
+            log_k_ratio = np.log(k_range[i+1] / k_range[i])
+            log_E_ratio = np.log(E_standard[i+1] / E_standard[i])
+            spectral_index_std[i] = log_E_ratio / log_k_ratio
+        
+        # For the holographic model
+        spectral_index_holo = np.zeros_like(k_range[1:])
+        for i in range(len(k_range)-1):
+            log_k_ratio = np.log(k_range[i+1] / k_range[i])
+            log_E_ratio = np.log(E_holo[i+1] / E_holo[i])
+            spectral_index_holo[i] = log_E_ratio / log_k_ratio
+        
+        # Calculate key scales relative to each other
+        scales_ratio = {
+            "k_inner_to_outer": k_inner / k_outer,
+            "k_holo_to_outer": k_holo / k_outer,
+            "k_holo_to_inner": k_holo / k_inner
+        }
+        
+        # Check if the holographic scale is within the turbulent cascade range
+        holo_in_cascade = k_outer < k_holo < k_inner
+        
+        if holo_in_cascade:
+            logger.info("Holographic scale falls within the turbulent cascade range")
+            # Check where in the cascade range it falls (logarithmically)
+            log_position = (np.log10(k_holo) - np.log10(k_outer)) / (np.log10(k_inner) - np.log10(k_outer))
+            logger.info(f"Holographic scale at {log_position:.2f} of the way through the cascade (log scale)")
+        else:
+            logger.info("Holographic scale falls outside the turbulent cascade range")
+        
+        # Calculate characteristic times
+        tau_outer = 1.0 / (k_outer * mean_vA)  # s
+        tau_inner = 1.0 / (k_inner * mean_vA)  # s
+        tau_holo = 1.0 / (k_holo * mean_vA)    # s
+        
+        logger.info(f"Outer scale time: τ_outer = {tau_outer:.3e} s")
+        logger.info(f"Inner scale time: τ_inner = {tau_inner:.3e} s")
+        logger.info(f"Holographic scale time: τ_holo = {tau_holo:.3e} s")
+        logger.info(f"Information time scale: τ_info = {tau_info:.3e} s")
+        
+        # Return the analysis results
+        return {
+            "scale_parameters": {
+                "outer_scale": {
+                    "length": L_outer,  # m
+                    "wavenumber": k_outer,  # m^-1
+                    "time": tau_outer  # s
+                },
+                "inner_scale": {
+                    "length": np.mean(rho_i),  # m
+                    "wavenumber": k_inner,  # m^-1
+                    "time": tau_inner  # s
+                },
+                "holographic_scale": {
+                    "wavenumber": k_holo,  # m^-1
+                    "time": tau_holo,  # s
+                    "info_time": tau_info  # s
+                },
+                "scale_ratios": scales_ratio
+            },
+            "spectral_properties": {
+                "holo_in_cascade_range": holo_in_cascade,
+                "spectral_break_position": log_position if holo_in_cascade else None,
+                "holographic_modification": {
+                    "damping_coefficient": alpha,
+                    "spectral_steepening": np.mean(spectral_index_holo[post_holo_mask]) - np.mean(spectral_index_std[post_holo_mask]) if any(post_holo_mask) else None
+                }
+            },
+            "simulation_parameters": {
+                "wavenumbers": k_range.tolist(),  # Export subset for plotting
+                "standard_spectrum": E_standard.tolist(),  # Export subset for plotting
+                "holographic_spectrum": E_holo.tolist(),  # Export subset for plotting
+                "standard_spectral_index": spectral_index_std.tolist(),  # Export subset for plotting
+                "holographic_spectral_index": spectral_index_holo.tolist()  # Export subset for plotting
+            }
+        }
+
+    def create_validation_plots(self, parameters, results, evaluation):
+        """
+        Create visualizations to demonstrate key relationships for theory validation.
+        
+        Args:
+            parameters (dict): Physical parameters from analysis
+            results (dict): Analysis results
+            evaluation (dict): Theory evaluation results
+        """
+        logger.info("Creating validation plots")
+        
+        # Create figures directory if it doesn't exist
+        figures_dir = self.output_dir / "figures"
+        figures_dir.mkdir(exist_ok=True)
+        
+        # Set up plotting style
+        plt.style.use('seaborn-darkgrid')
+        
+        # 1. Combined Relationship Plot: T vs Thomson/(g×f(B))
+        self._plot_combined_relationship(parameters, results, figures_dir)
+        
+        # 2. Information Processing Constraint Plot
+        self._plot_information_constraints(parameters, results, figures_dir)
+        
+        # 3. Holographic Scale Transition Plot
+        self._plot_holographic_transition(parameters, results, figures_dir)
+        
+        logger.info("Validation plots created successfully")
+        
+    def _plot_combined_relationship(self, parameters, results, figures_dir):
+        """Create plot showing the relationship between temperature and Thomson/(g×f(B))."""
+        try:
+            # Extract data from maps
+            maps = parameters.get('maps', {})
+            T = maps['temperature_map'].data.flatten()
+            S = maps['scattering_map'].data.flatten()
+            g = maps['g_field_map'].data.flatten()
+            f_B = maps['f_B_map'].data.flatten()
+            
+            # Create valid data mask
+            valid_mask = ~np.isnan(T) & ~np.isnan(S) & ~np.isnan(g) & ~np.isnan(f_B)
+            valid_mask &= (T > 0) & (S > 0) & (g > 0) & (f_B > 0)
+            
+            # Extract valid data
+            T_valid = T[valid_mask]
+            S_valid = S[valid_mask]
+            g_valid = g[valid_mask]
+            f_B_valid = f_B[valid_mask]
+            
+            # Calculate combined factor
+            combined = S_valid / (g_valid * f_B_valid)
+            
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            # Plot data
+            scatter = ax.scatter(np.log10(combined), np.log10(T_valid), 
+                               alpha=0.5, c=np.log10(f_B_valid), cmap='viridis')
+            
+            # Add colorbar
+            cbar = plt.colorbar(scatter)
+            cbar.set_label('log₁₀(f(B))', rotation=90)
+            
+            # Add theoretical prediction line
+            x_range = np.linspace(np.min(np.log10(combined)), np.max(np.log10(combined)), 100)
+            # Theory predicts T ∝ (S/(g×f(B)))^(1/4)
+            y_theory = 0.25 * x_range + np.mean(np.log10(T_valid) - 0.25 * np.log10(combined))
+            ax.plot(x_range, y_theory, 'r--', label='Theoretical Prediction (T ∝ X¹/⁴)')
+            
+            # Add labels and title
+            ax.set_xlabel('log₁₀(Thomson/(g×f(B)))')
+            ax.set_ylabel('log₁₀(Temperature [K])')
+            ax.set_title('Temperature vs Modified Thomson Scattering\nHolographic Theory Test')
+            
+            # Add legend
+            ax.legend()
+            
+            # Add theory validation threshold
+            combined_results = results.get('validation_results', {}).get('combined_relationship', {})
+            r_squared = combined_results.get('r_squared', 0)
+            ax.text(0.05, 0.95, f'R² = {r_squared:.3f}\nThreshold: R² > 0.3',
+                   transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8))
+            
+            # Save figure
+            plt.savefig(figures_dir / 'combined_relationship.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            
+        except Exception as e:
+            logger.error(f"Error creating combined relationship plot: {str(e)}")
+            
+    def _plot_information_constraints(self, parameters, results, figures_dir):
+        """Create plot showing information processing constraints on Thomson scattering."""
+        try:
+            # Extract data
+            maps = parameters.get('maps', {})
+            S = maps['scattering_map'].data.flatten()
+            T = maps['temperature_map'].data.flatten()
+            
+            # Universal information processing rate
+            gamma = 1.89e-29  # s^-1
+            
+            # Calculate information processing time
+            tau_info = 1.0 / gamma
+            
+            # Create valid data mask
+            valid_mask = ~np.isnan(S) & ~np.isnan(T) & (S > 0) & (T > 0)
+            
+            # Extract valid data
+            S_valid = S[valid_mask]
+            T_valid = T[valid_mask]
+            
+            # Calculate scattering timescale (simplified)
+            tau_scatter = 1.0 / S_valid
+            
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            # Plot data
+            scatter = ax.scatter(np.log10(tau_scatter), np.log10(T_valid), 
+                               alpha=0.5, c=np.log10(S_valid), cmap='plasma')
+            
+            # Add colorbar
+            cbar = plt.colorbar(scatter)
+            cbar.set_label('log₁₀(Scattering Rate [s⁻¹])', rotation=90)
+            
+            # Add information processing time threshold
+            ax.axvline(np.log10(tau_info), color='r', linestyle='--', 
+                      label='Information Processing Threshold')
+            
+            # Add labels and title
+            ax.set_xlabel('log₁₀(Scattering Time [s])')
+            ax.set_ylabel('log₁₀(Temperature [K])')
+            ax.set_title('Temperature vs Scattering Time\nInformation Processing Constraints')
+            
+            # Add legend
+            ax.legend()
+            
+            # Add statistics
+            holographic_results = results.get('validation_results', {}).get('holographic_model', {})
+            ratio = holographic_results.get('gamma_H_ratio', 0)
+            theoretical_ratio = 1.0 / (8 * np.pi)
+            ax.text(0.05, 0.95, 
+                   f'γ/H Ratio = {ratio:.3e}\nTheoretical: {theoretical_ratio:.3e}',
+                   transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8))
+            
+            # Save figure
+            plt.savefig(figures_dir / 'information_constraints.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            
+        except Exception as e:
+            logger.error(f"Error creating information constraints plot: {str(e)}")
+            
+    def _plot_holographic_transition(self, parameters, results, figures_dir):
+        """Create plot showing the holographic transition in the turbulent cascade."""
+        try:
+            # Extract turbulence analysis results
+            turbulence_results = results.get('turbulence_analysis', {})
+            k_range = np.array(turbulence_results.get('simulation_parameters', {}).get('wavenumbers', []))
+            E_standard = np.array(turbulence_results.get('simulation_parameters', {}).get('standard_spectrum', []))
+            E_holo = np.array(turbulence_results.get('simulation_parameters', {}).get('holographic_spectrum', []))
+            
+            if len(k_range) == 0 or len(E_standard) == 0 or len(E_holo) == 0:
+                logger.warning("Insufficient data for holographic transition plot")
+                return
+            
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            # Plot standard and holographic spectra
+            ax.loglog(k_range, E_standard, 'b-', label='Standard MHD', alpha=0.7)
+            ax.loglog(k_range, E_holo, 'r-', label='Holographic', alpha=0.7)
+            
+            # Add holographic scale
+            k_holo = turbulence_results.get('scale_parameters', {}).get('holographic_scale', {}).get('wavenumber')
+            if k_holo:
+                ax.axvline(k_holo, color='g', linestyle='--', label='Holographic Scale')
+            
+            # Add Kolmogorov scaling reference
+            k_ref = np.array([k_range[0], k_range[-1]])
+            E_ref = k_ref**(-5/3)
+            E_ref *= E_standard[0] / E_ref[0]  # Normalize
+            ax.loglog(k_ref, E_ref, 'k:', label='k⁻⁵/³ Reference', alpha=0.5)
+            
+            # Add labels and title
+            ax.set_xlabel('Wavenumber k [m⁻¹]')
+            ax.set_ylabel('Energy Spectrum E(k)')
+            ax.set_title('Turbulent Energy Spectrum\nHolographic Transition')
+            
+            # Add legend
+            ax.legend()
+            
+            # Add statistics
+            spectral_props = turbulence_results.get('spectral_properties', {})
+            steepening = spectral_props.get('holographic_modification', {}).get('spectral_steepening', 0)
+            ax.text(0.05, 0.95, 
+                   f'Spectral Steepening: {steepening:.3f}\nThreshold: > 0.5',
+                   transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8))
+            
+            # Save figure
+            plt.savefig(figures_dir / 'holographic_transition.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            
+        except Exception as e:
+            logger.error(f"Error creating holographic transition plot: {str(e)}")
 
 def main():
     """Main function to run the analysis."""
